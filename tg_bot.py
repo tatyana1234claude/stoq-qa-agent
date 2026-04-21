@@ -13,9 +13,9 @@ BOT_TOKEN = "8783683988:AAHczUKaneFo3FK2JTuRlrN7bLxXgdIgUA0"
 ALLOWED_USER_ID = 7245888111
 
 # Заполни после создания репозитория на GitHub:
-GITHUB_TOKEN = ""        # Settings → Developer settings → Tokens → Generate new token (repo + workflow)
-GITHUB_OWNER = ""        # твой username на GitHub
-GITHUB_REPO  = "stoq-qa-agent"   # название репозитория
+GITHUB_TOKEN = ""
+GITHUB_OWNER = "tatyana1234claude"
+GITHUB_REPO  = "stoq-qa-agent"
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
