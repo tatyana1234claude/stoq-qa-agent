@@ -13,7 +13,7 @@ BOT_TOKEN = "8783683988:AAHczUKaneFo3FK2JTuRlrN7bLxXgdIgUA0"
 ALLOWED_USER_ID = 7245888111
 
 # Заполни после создания репозитория на GitHub:
-GITHUB_TOKEN = ""
+GITHUB_TOKEN = os.environ.get("GH_TOKEN", "")
 GITHUB_OWNER = "tatyana1234claude"
 GITHUB_REPO  = "stoq-qa-agent"
 
