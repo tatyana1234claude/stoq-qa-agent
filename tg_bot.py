@@ -20,12 +20,16 @@ SESSION.timeout = 60
 
 KB = {
     "keyboard": [
-        [{"text": "▶ Запустить проверку"}],
-        [{"text": "📊 Статус последней проверки"}],
-        [{"text": "ℹ️ Помощь"}]
+        [{"text": "\u25b6 \u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443"}],
+        [{"text": "\ud83d\udcca \u0421\u0442\u0430\u0442\u0443\u0441 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438"}],
+        [{"text": "\u2139\ufe0f \u041f\u043e\u043c\u043e\u0449\u044c"}]
     ],
     "resize_keyboard": True
 }
+
+# Защита от двойного запуска
+_watching = False
+_watch_lock = threading.Lock()
 
 
 def send(chat_id, text, keyboard=None):
@@ -72,7 +76,6 @@ def get_latest_run():
 
 
 def get_run_jobs(run_id):
-    """Получает детали шагов из запуска"""
     try:
         r = SESSION.get(
             f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/runs/{run_id}/jobs",
@@ -81,108 +84,97 @@ def get_run_jobs(run_id):
         )
         jobs = r.json().get("jobs", [])
         if jobs:
-            steps = jobs[0].get("steps", [])
-            return steps
+            return jobs[0].get("steps", [])
     except Exception as e:
         print(f"get_jobs error: {e}")
     return []
 
 
 def format_report(run, steps):
-    """Форматирует отчёт для Telegram"""
     conclusion = run.get("conclusion", "unknown")
     run_number = run.get("run_number", "?")
     url = run.get("html_url", "")
+
     duration_sec = 0
-    if run.get("created_at") and run.get("updated_at"):
-        try:
-            from datetime import datetime
-            fmt = "%Y-%m-%dT%H:%M:%SZ"
-            t1 = datetime.strptime(run["created_at"], fmt)
-            t2 = datetime.strptime(run["updated_at"], fmt)
-            duration_sec = int((t2 - t1).total_seconds())
-        except:
-            pass
+    try:
+        from datetime import datetime
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        t1 = datetime.strptime(run["created_at"], fmt)
+        t2 = datetime.strptime(run["updated_at"], fmt)
+        duration_sec = int((t2 - t1).total_seconds())
+    except:
+        pass
 
     if conclusion == "success":
-        header = f"✅ <b>Проверка #{run_number} завершена успешно!</b>"
+        header = f"\u2705 <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 #{run_number} \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430!</b>"
     elif conclusion == "failure":
-        header = f"❌ <b>Проверка #{run_number} выявила проблемы!</b>"
+        header = f"\u274c <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 #{run_number} \u0432\u044b\u044f\u0432\u0438\u043b\u0430 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u044b!</b>"
     else:
-        header = f"⚠️ <b>Проверка #{run_number}: {conclusion}</b>"
+        header = f"\u26a0\ufe0f <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 #{run_number}: {conclusion}</b>"
 
-    lines = [header, f"⏱ Время: {duration_sec}с", ""]
+    lines = [header, f"\u23f1 \u0412\u0440\u0435\u043c\u044f: {duration_sec}\u0441", ""]
 
-    # Статус шагов
-    step_icons = {
-        "success": "✅",
-        "failure": "❌",
-        "skipped": "⏭",
-        "cancelled": "⚠️"
-    }
+    step_icons = {"success": "\u2705", "failure": "\u274c", "skipped": "\u23ed", "cancelled": "\u26a0\ufe0f"}
+    important = ["Run QA Agent", "Install dependencies", "Upload report", "Setup Python"]
 
-    important_steps = [
-        "Run QA Agent",
-        "Install dependencies",
-        "Upload report",
-        "Setup Python"
-    ]
-
-    lines.append("<b>Шаги проверки:</b>")
+    lines.append("<b>\u0428\u0430\u0433\u0438 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438:</b>")
     for step in steps:
         name = step.get("name", "")
         status = step.get("conclusion") or step.get("status", "")
-        icon = step_icons.get(status, "⭕")
-        if any(s in name for s in important_steps):
+        icon = step_icons.get(status, "\u2b55")
+        if any(s in name for s in important):
             lines.append(f"  {icon} {name}")
 
     lines.append("")
 
     if conclusion == "success":
-        lines.append("📄 <b>Отчёт доступен на GitHub:</b>")
-        lines.append(f'<a href="{url}">Открыть запуск #{run_number}</a>')
+        lines.append(f"\ud83d\udcc4 <b>\u041e\u0442\u0447\u0451\u0442 \u043d\u0430 GitHub:</b>")
+        lines.append(f'<a href="{url}">\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0437\u0430\u043f\u0443\u0441\u043a #{run_number}</a>')
         lines.append("")
-        lines.append("💡 В разделе <b>Artifacts</b> — HTML с подробностями и скриншотами.")
+        lines.append("\ud83d\udca1 \u0412 \u0440\u0430\u0437\u0434\u0435\u043b\u0435 <b>Artifacts</b> \u2014 HTML \u0441\u043e \u0441\u043a\u0440\u0438\u043d\u0448\u043e\u0442\u0430\u043c\u0438 \u0438 \u043f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u044f\u043c\u0438.")
     else:
-        lines.append(f'🔗 <a href="{url}">Посмотреть ошибки на GitHub</a>')
+        lines.append(f'\ud83d\udd17 <a href="{url}">\u041f\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u043e\u0448\u0438\u0431\u043a\u0438 \u043d\u0430 GitHub</a>')
 
     return "\n".join(lines)
 
 
 def watch_and_report(chat_id, run_id_to_watch):
-    """Следит за запуском и присылает отчёт когда завершится"""
+    global _watching
     print(f"Слежу за запуском {run_id_to_watch}...")
-    max_wait = 60 * 15  # максимум 15 минут
+    max_wait = 60 * 15
     elapsed = 0
     interval = 30
 
-    while elapsed < max_wait:
-        time.sleep(interval)
-        elapsed += interval
+    try:
+        while elapsed < max_wait:
+            time.sleep(interval)
+            elapsed += interval
 
-        run = get_latest_run()
-        if not run or run["id"] != run_id_to_watch:
-            continue
+            run = get_latest_run()
+            if not run or run["id"] != run_id_to_watch:
+                continue
 
-        status = run.get("status")
-        conclusion = run.get("conclusion")
+            status = run.get("status")
+            print(f"  Статус: {status} ({elapsed}с)")
 
-        print(f"  Статус: {status} / {conclusion} ({elapsed}с)")
+            if status == "completed":
+                steps = get_run_jobs(run_id_to_watch)
+                report = format_report(run, steps)
+                send(chat_id, report, keyboard=KB)
+                return
 
-        if status == "completed":
-            steps = get_run_jobs(run_id_to_watch)
-            report = format_report(run, steps)
-            send(chat_id, report, keyboard=KB)
-            return
-
-    send(chat_id,
-        "⏰ Проверка идёт уже 15 минут — возможно зависла.\n"
-        f'Проверь вручную: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions',
-        keyboard=KB
-    )
+        send(chat_id,
+            "\u23f0 \u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0438\u0434\u0451\u0442 \u0443\u0436\u0435 15 \u043c\u0438\u043d\u0443\u0442 \u2014 \u0432\u043e\u0437\u043c\u043e\u0436\u043d\u043e \u0437\u0430\u0432\u0438\u0441\u043b\u0430.\n"
+            f'\u041f\u0440\u043e\u0432\u0435\u0440\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions',
+            keyboard=KB
+        )
+    finally:
+        with _watch_lock:
+            _watching = False
 
 
 def run():
+    global _watching
     print("Бот запущен! Жду команды...")
     offset = 0
 
@@ -213,26 +205,47 @@ def run():
 
                 if text in ("/start", "/menu"):
                     send(chat_id,
-                        "👋 <b>QA Agent — stoq.ai</b>\n\n"
-                        "Нажми кнопку чтобы запустить проверку.\n"
-                        "Результат пришлю сюда автоматически через ~3 минуты.",
+                        "\ud83d\udc4b <b>QA Agent \u2014 stoq.ai</b>\n\n"
+                        "\u041d\u0430\u0436\u043c\u0438 \u043a\u043d\u043e\u043f\u043a\u0443 \u0447\u0442\u043e\u0431\u044b \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443.\n"
+                        "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442 \u043f\u0440\u0438\u0448\u043b\u044e \u0441\u044e\u0434\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u0447\u0435\u0440\u0435\u0437 ~3 \u043c\u0438\u043d\u0443\u0442\u044b.",
                         keyboard=KB)
 
-                elif text == "▶ Запустить проверку":
-                    send(chat_id, "⏳ Запускаю проверку на GitHub...")
+                elif text == "\u25b6 \u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443":
+                    # Защита от двойного запуска
+                    with _watch_lock:
+                        if _watching:
+                            send(chat_id,
+                                "\u23f3 <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0443\u0436\u0435 \u0438\u0434\u0451\u0442!</b>\n\n"
+                                "\u041f\u043e\u0434\u043e\u0436\u0434\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435 \u043f\u0440\u0438\u0434\u0451\u0442 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442.",
+                                keyboard=KB)
+                            continue
+
+                    # Проверяем GitHub тоже
+                    run_data = get_latest_run()
+                    if run_data and run_data.get("status") in ("in_progress", "queued"):
+                        send(chat_id,
+                            "\u23f3 <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0443\u0436\u0435 \u0438\u0434\u0451\u0442 \u043d\u0430 GitHub!</b>\n\n"
+                            f'\u0421\u043b\u0435\u0434\u0438: <a href="{run_data["html_url"]}">GitHub Actions</a>',
+                            keyboard=KB)
+                        continue
+
+                    send(chat_id, "\u23f3 \u0417\u0430\u043f\u0443\u0441\u043a\u0430\u044e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u043d\u0430 GitHub...")
                     ok, err = trigger_action()
+
                     if ok:
-                        time.sleep(3)
+                        time.sleep(4)
                         run_data = get_latest_run()
                         run_id = run_data["id"] if run_data else None
 
                         send(chat_id,
-                            "✅ <b>Проверка запущена!</b>\n\n"
-                            "⏳ Жди ~3 минуты — пришлю результат сюда автоматически.\n\n"
-                            f'<a href="https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions">Следить на GitHub</a>',
+                            "\u2705 <b>\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430!</b>\n\n"
+                            "\u23f3 \u0416\u0434\u0438 ~3 \u043c\u0438\u043d\u0443\u0442\u044b \u2014 \u043f\u0440\u0438\u0448\u043b\u044e \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442 \u0441\u044e\u0434\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438.\n\n"
+                            f'<a href="https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions">\u0421\u043b\u0435\u0434\u0438\u0442\u044c \u043d\u0430 GitHub</a>',
                             keyboard=KB)
 
                         if run_id:
+                            with _watch_lock:
+                                _watching = True
                             t = threading.Thread(
                                 target=watch_and_report,
                                 args=(chat_id, run_id),
@@ -240,42 +253,42 @@ def run():
                             )
                             t.start()
                     else:
-                        send(chat_id, f"❌ Ошибка запуска:\n{err}", keyboard=KB)
+                        send(chat_id, f"\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0443\u0441\u043a\u0430:\n{err}", keyboard=KB)
                         print(f"GitHub error: {err}")
 
-                elif text == "📊 Статус последней проверки":
+                elif text == "\ud83d\udcca \u0421\u0442\u0430\u0442\u0443\u0441 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438":
                     run_data = get_latest_run()
                     if run_data:
-                        icons = {"completed": "✅", "in_progress": "⏳", "queued": "🕐"}
+                        icons = {"completed": "\u2705", "in_progress": "\u23f3", "queued": "\ud83d\udd50"}
                         conclusions = {
-                            "success": "✅ Успешно",
-                            "failure": "❌ Есть проблемы",
-                            "cancelled": "⚠️ Отменено"
+                            "success": "\u2705 \u0423\u0441\u043f\u0435\u0448\u043d\u043e",
+                            "failure": "\u274c \u0415\u0441\u0442\u044c \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u044b",
+                            "cancelled": "\u26a0\ufe0f \u041e\u0442\u043c\u0435\u043d\u0435\u043d\u043e"
                         }
-                        status_icon = icons.get(run_data["status"], "❓")
-                        conclusion = conclusions.get(run_data.get("conclusion") or "", "В процессе")
+                        status_icon = icons.get(run_data["status"], "\u2753")
+                        conclusion = conclusions.get(run_data.get("conclusion") or "", "\u0412 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0435")
                         send(chat_id,
-                            f"{status_icon} <b>Статус:</b> {conclusion}\n"
-                            f"🔢 Запуск #{run_data['run_number']}\n"
-                            f'🔗 <a href="{run_data["html_url"]}">Открыть на GitHub</a>',
+                            f"{status_icon} <b>\u0421\u0442\u0430\u0442\u0443\u0441:</b> {conclusion}\n"
+                            f"\ud83d\udd22 \u0417\u0430\u043f\u0443\u0441\u043a #{run_data['run_number']}\n"
+                            f'\ud83d\udd17 <a href="{run_data["html_url"]}">\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043d\u0430 GitHub</a>',
                             keyboard=KB)
                     else:
-                        send(chat_id, "Нет данных о проверках.", keyboard=KB)
+                        send(chat_id, "\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445 \u043e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430\u0445.", keyboard=KB)
 
-                elif text == "ℹ️ Помощь":
+                elif text == "\u2139\ufe0f \u041f\u043e\u043c\u043e\u0449\u044c":
                     send(chat_id,
-                        "<b>Как пользоваться:</b>\n\n"
-                        "1️⃣ Нажми <b>▶ Запустить проверку</b>\n"
-                        "2️⃣ Жди ~3 минуты\n"
-                        "3️⃣ Получи результат прямо здесь\n\n"
-                        "<b>Что проверяется:</b>\n"
-                        "• Горизонтальный скролл\n"
-                        "• Сломанные картинки\n"
-                        "• Элементы выходящие за экран\n"
-                        "• Битые ссылки (404)\n"
-                        "• JS ошибки в консоли\n"
-                        "• Скорость загрузки и FCP\n"
-                        "• На 4 экранах: 📱 планшет 💻 ноутбук 🖥 десктоп",
+                        "<b>\u041a\u0430\u043a \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c\u0441\u044f:</b>\n\n"
+                        "1\ufe0f\u20e3 \u041d\u0430\u0436\u043c\u0438 <b>\u25b6 \u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443</b>\n"
+                        "2\ufe0f\u20e3 \u0416\u0434\u0438 ~3 \u043c\u0438\u043d\u0443\u0442\u044b\n"
+                        "3\ufe0f\u20e3 \u041f\u043e\u043b\u0443\u0447\u0438 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442 \u0437\u0434\u0435\u0441\u044c\n\n"
+                        "<b>\u0427\u0442\u043e \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u0442\u0441\u044f:</b>\n"
+                        "\u2022 \u0413\u043e\u0440\u0438\u0437\u043e\u043d\u0442\u0430\u043b\u044c\u043d\u044b\u0439 \u0441\u043a\u0440\u043e\u043b\u043b\n"
+                        "\u2022 \u0421\u043b\u043e\u043c\u0430\u043d\u043d\u044b\u0435 \u043a\u0430\u0440\u0442\u0438\u043d\u043a\u0438\n"
+                        "\u2022 \u042d\u043b\u0435\u043c\u0435\u043d\u0442\u044b \u0432\u044b\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u0437\u0430 \u044d\u043a\u0440\u0430\u043d\n"
+                        "\u2022 \u0411\u0438\u0442\u044b\u0435 \u0441\u0441\u044b\u043b\u043a\u0438 (404)\n"
+                        "\u2022 JS \u043e\u0448\u0438\u0431\u043a\u0438 \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u0438\n"
+                        "\u2022 \u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438\n"
+                        "\u2022 \u041d\u0430 4 \u044d\u043a\u0440\u0430\u043d\u0430\u0445: \ud83d\udcf1 \ud83d\udcf2 \ud83d\udcbb \ud83d\udda5",
                         keyboard=KB)
 
         except requests.exceptions.Timeout:
