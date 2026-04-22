@@ -4,7 +4,7 @@ import requests
 import threading
 
 BOT_TOKEN = "8783683988:AAHczUKaneFo3FK2JTuRlrN7bLxXgdIgUA0"
-ALLOWED_USER_ID = 7245888111
+ALLOWED_USER_IDS = [7245888111, 1245843153]
 GITHUB_TOKEN = os.environ.get("GH_TOKEN", "")
 GITHUB_OWNER = "tatyana1234claude"
 GITHUB_REPO  = "stoq-qa-agent"
@@ -199,7 +199,7 @@ def run():
 
                 print(f"Сообщение от {user_id}: {text}")
 
-                if user_id != ALLOWED_USER_ID:
+                if user_id not in ALLOWED_USER_IDS:
                     send(chat_id, "Нет доступа.")
                     continue
 
